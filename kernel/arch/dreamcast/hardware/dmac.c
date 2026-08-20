@@ -4,11 +4,11 @@
 
    Copyright (C) 2025 Paul Cercueil
 */
-#include <arch/cache.h>
 #include <arch/dmac.h>
 
 #include <dc/memory.h>
 
+#include <kos/cache.h>
 #include <kos/dbglog.h>
 #include <kos/genwait.h>
 #include <kos/irq.h>
@@ -59,8 +59,8 @@ static const irq_t channel_to_irq[] = {
     [3] = EXC_DMAC_DMTE3,
 };
 
-static inline unsigned char irq_to_channel(irq_t irq) {
-    return (irq - EXC_DMAC_DMTE0) >> 5;
+static inline dma_channel_t irq_to_channel(irq_t irq) {
+    return (dma_channel_t)((irq - EXC_DMAC_DMTE0) >> 5);
 }
 
 static uint32_t dmac_read(dma_channel_t channel, dma_register_t reg) {
@@ -83,7 +83,7 @@ static dma_addr_t dma_map_src_dst(uintptr_t addr, size_t len, bool is_dst) {
         if(is_dst)
             dcache_inval_range(addr, len);
         else
-            dcache_flush_range(addr, len);
+            dcache_wback_range(addr, len);
         break;
 
     default:
@@ -111,7 +111,7 @@ static const unsigned char dma_unit_size[] = {
 };
 
 static void dma_irq_handler(irq_t code, irq_context_t *context, void *d) {
-    unsigned char channel = irq_to_channel(code);
+    dma_channel_t channel = irq_to_channel(code);
 
     (void)context;
 
@@ -199,16 +199,16 @@ void dma_init(void) {
     if(KOS_PLATFORM_IS_NAOMI) {
         uint32_t chcr, dmaor;
 
-        dmac_write(2, DMA_REG_SAR, 0);
+        dmac_write(DMA_CHANNEL_2, DMA_REG_SAR, 0);
 
         chcr = FIELD_PREP(REG_CHCR_SRC_ADDRMODE, DMA_ADDRMODE_INCREMENT)
             | FIELD_PREP(REG_CHCR_REQUEST, DMA_REQUEST_EXTERNAL_MEM_TO_DEV)
             | FIELD_PREP(REG_CHCR_DMAC_EN, 1);
-        dmac_write(2, DMA_REG_CHCR, chcr);
+        dmac_write(DMA_CHANNEL_2, DMA_REG_CHCR, chcr);
 
         dmaor = REG_DMAOR_DDT
             | FIELD_PREP(REG_DMAOR_PR, DMAOR_PR_CH2013)
             | REG_DMAOR_DME;
-        dmac_write(0, DMA_REG_DMAOR, dmaor);
+        dmac_write(DMA_CHANNEL_0, DMA_REG_DMAOR, dmaor);
     }
 }

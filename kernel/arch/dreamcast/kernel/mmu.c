@@ -12,10 +12,10 @@
 
 #include <arch/arch.h>
 #include <arch/mmu.h>
-#include <arch/cache.h>
 
 #include <dc/memory.h>
 
+#include <kos/cache.h>
 #include <kos/dbgio.h>
 #include <kos/irq.h>
 #include <kos/regfield.h>
@@ -236,6 +236,8 @@ static void mmu_page_map_single(mmucontext_t *context,
 
     if(sub == NULL) {
         sub = (mmusubcontext_t *)malloc(sizeof(mmusubcontext_t));
+        if(sub == NULL)
+            return;
 
         for(i = 0; i < MMU_SUB_PAGES; i++)
             sub->page[i].valid = 0;

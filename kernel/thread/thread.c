@@ -138,7 +138,6 @@ int thd_pslist(int (*pf)(const char *fmt, ...)) {
     pf("addr\t  tid\tprio\tflags\t  wait_timeout\t  cpu_time\t      state\t  name\n");
 
     irq_disable_scoped();
-    thd_get_cpu_time(thd_get_current());
     ms_time = timer_ms_gettime64();
 
     LIST_FOREACH(cur, &thd_list, t_list) {
@@ -1004,7 +1003,10 @@ void thd_set_pwd(kthread_t *__RESTRICT thd, const char *__RESTRICT pwd) {
 }
 
 int *thd_get_errno(kthread_t *thd) {
-    return &thd->thd_errno;
+    if(!thd)
+        thd = thd_current;
+
+    return &(__errno_r(&thd->thd_reent));
 }
 
 struct _reent *thd_get_reent(kthread_t *thd) {

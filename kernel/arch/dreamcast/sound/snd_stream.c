@@ -4,7 +4,7 @@
    Copyright (C) 2000, 2001, 2002, 2003, 2004 Megan Potter
    Copyright (C) 2002 Florian Schulze
    Copyright (C) 2020 Lawrence Sebald
-   Copyright (C) 2023, 2024, 2025 Ruslan Rostovtsev
+   Copyright (C) 2023, 2024, 2025, 2026 Ruslan Rostovtsev
    Copyright (C) 2024 Stefanos Kornilios Mitsis Poiitidis
 
    SH-4 support routines for SPU streaming sound driver
@@ -18,10 +18,10 @@
 #include <sys/cdefs.h>
 #include <sys/queue.h>
 
+#include <kos/cache.h>
 #include <kos/dbglog.h>
 #include <kos/sem.h>
 #include <kos/thread.h>
-#include <arch/cache.h>
 #include <kos/timer.h>
 #include <dc/g2bus.h>
 #include <dc/sq.h>
@@ -173,6 +173,8 @@ void snd_stream_filter_add(snd_stream_hnd_t hnd, snd_stream_filter_t filtfunc, v
     CHECK_HND(hnd);
 
     f = malloc(sizeof(filter_t));
+    assert(f != NULL);
+
     f->func = filtfunc;
     f->data = obj;
     TAILQ_INSERT_TAIL(&streams[hnd].filters, f, lent);
@@ -209,19 +211,19 @@ static void snd_pcm16_split_unaligned(void *buffer, void *left, void *right, siz
     uint32_t right_val;
 
     for(; len >= 8; len -= 8) {
-        dcache_pref_block(buf + 8);
+        dcache_pref_line(buf + 8);
 
         data = *buf++;
-        left_val = (data >> 16);
-        right_val = (data & 0xffff);
+        left_val = (data & 0xffff) << 16;
+        right_val = (data >> 16) << 16;
 
         data = *buf++;
-        left_val |= (data & 0xffff0000);
-        right_val |= (data & 0xffff) << 16;
+        left_val |= (data & 0xffff);
+        right_val |= (data >> 16);
 
         if(__is_aligned(left_ptr, 32)) {
-            dcache_alloc_block(left_ptr++, left_val);
-            dcache_alloc_block(right_ptr++, right_val);
+            dcache_alloc_line_with_value(left_ptr++, left_val);
+            dcache_alloc_line_with_value(right_ptr++, right_val);
         }
         else {
             *left_ptr++ = left_val;
@@ -230,8 +232,8 @@ static void snd_pcm16_split_unaligned(void *buffer, void *left, void *right, siz
     }
     if(len) {
         data = *buf++;
-        *(uint16_t *)left_ptr = (data >> 16);
-        *(uint16_t *)right_ptr = (data & 0xffff);
+        *(uint16_t *)left_ptr = (data & 0xffff);
+        *(uint16_t *)right_ptr = (data >> 16);
     }
 }
 
@@ -250,7 +252,7 @@ void snd_pcm16_split_sq(uint32_t *data, uintptr_t left, uintptr_t right, size_t 
     masked_right = SQ_MASK_DEST(right);
 
     sq_lock((void *)left);
-    dcache_pref_block(s);
+    dcache_pref_line(s);
 
     g2_lock_scoped();
 

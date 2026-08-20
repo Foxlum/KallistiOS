@@ -7,7 +7,6 @@
 #include <dc/sci.h>
 #include <dc/math.h>
 #include <arch/arch.h>
-#include <arch/cache.h>
 #include <arch/dmac.h>
 #include <kos/timer.h>
 
@@ -152,11 +151,11 @@ static dma_config_t sci_dma_rx_config = {
     .callback = NULL
 };
 
-static __always_inline void clear_sci_errors() {
+static __always_inline void clear_sci_errors(void) {
     SCSSR1 &= ~(ORER | FER | PER);
 }
 
-static __always_inline sci_result_t check_sci_errors() {
+static __always_inline sci_result_t check_sci_errors(void) {
     uint8_t status = SCSSR1;
 
     if(status & ORER) {
@@ -417,7 +416,7 @@ void sci_configure_uart(sci_uart_config_t config, uint8_t *scsmr1) {
     }
 }
 
-static void sci_shutdown_spi_cs() {
+static void sci_shutdown_spi_cs(void) {
     uint16_t sptr;
     uint16_t fcr;
 
@@ -575,7 +574,7 @@ sci_result_t sci_read_byte(uint8_t *data) {
     return SCI_OK;
 }
 
-sci_result_t sci_write_data(uint8_t *data, size_t len) {
+sci_result_t sci_write_data(const uint8_t *data, size_t len) {
     uint32_t timeout_cnt;
     sci_result_t result;
 

@@ -46,7 +46,7 @@ __BEGIN_DECLS
 /** \brief   Retrieve a PVR register value
 
     \param   REG             The register to fetch. See \ref pvr_regs.
-    
+
     \return                  The value of that register (32-bits)
 */
 #define PVR_GET(REG) (* ( (volatile uint32_t *)( 0xa05f8000 + (REG) ) ) )
@@ -68,7 +68,7 @@ __BEGIN_DECLS
 
     \note
     2D specific registers have been excluded for now (like
-    vsync, hsync, v/h size, etc) 
+    vsync, hsync, v/h size, etc)
 
     @{
 */
@@ -136,6 +136,8 @@ __BEGIN_DECLS
 #define PVR_UNK_0110            0x0110  /**< \brief ?? -- write 0x93f39 for now */
 #define PVR_UNK_0114            0x0114  /**< \brief ?? -- write 0x200000 for now */
 #define PVR_UNK_0118            0x0118  /**< \brief ?? -- write 0x8040 for now */
+
+#define PVR_PT_ALPHA_REF        0x011c  /**< \brief Only pixels with alpha >= this value are drawn for Punch Through polygons */
 
 #define PVR_TA_OPB_START        0x0124  /**< \brief Object Pointer Buffer start for TA usage */
 #define PVR_TA_VERTBUF_START    0x0128  /**< \brief Vertex buffer start for TA usage */

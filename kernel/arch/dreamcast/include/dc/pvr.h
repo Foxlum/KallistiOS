@@ -44,8 +44,6 @@ __BEGIN_DECLS
 #include <stdint.h>
 
 #include <dc/memory.h>
-#include <arch/types.h>
-#include <arch/cache.h>
 #include <dc/sq.h>
 #include <kos/img.h>
 #include <kos/regfield.h>
@@ -660,6 +658,7 @@ Striplength set to 2 */
     You essentially fill one of these in, and pass it to pvr_init().
 
     \headerfile dc/pvr.h
+    \sa pvr_default_params
 */
 typedef struct {
     /** \brief  Bin sizes.
@@ -715,6 +714,19 @@ typedef struct {
 
 } pvr_init_params_t;
 
+/** \brief   PVR initialization structure defaults
+    \ingroup pvr_init
+
+    These are the default values for pvr_init_params_t used by pvr_init_defaults().
+
+    \sa pvr_init_defaults()
+*/
+static const pvr_init_params_t pvr_default_params = {
+    .opb_sizes = { PVR_BINSIZE_16, PVR_BINSIZE_0, PVR_BINSIZE_16, PVR_BINSIZE_0, PVR_BINSIZE_0 },
+    .vertex_buf_size = 512 * 1024,
+    .opb_overflow_count = 3
+};
+
 /** \brief   Initialize the PVR chip to ready status.
     \ingroup pvr_init
 
@@ -733,13 +745,14 @@ int pvr_init(const pvr_init_params_t *params);
 /** \brief   Simple PVR initialization.
     \ingroup pvr_init
 
-    This simpler function initializes the PVR using 16/16 for the opaque
-    and translucent lists' bin sizes, and 0's for everything else. It sets 512KB
-    of vertex buffer. This is equivalent to the old ta_init_defaults() for now.
+    This simpler function initializes the PVR using the default parameters defined in
+    pvr_default_params.
 
     \retval 0               On success
     \retval -1              If the PVR has already been initialized or the video
                             mode active is not suitable for 3D
+
+    \sa pvr_default_params
 */
 int pvr_init_defaults(void);
 
@@ -867,7 +880,7 @@ void pvr_vertbuf_written(pvr_list_t list, size_t amt);
              frame buffer.
     \ingroup pvr_scene_mgmt
 
-    You must call this function (or pvr_scene_begin_txr()) for ever frame of
+    You must call this function (or pvr_scene_begin_rtt()) for ever frame of
     output.
 */
 void pvr_scene_begin(void);
@@ -875,6 +888,7 @@ void pvr_scene_begin(void);
 /** \brief   Begin collecting data for a frame of 3D output to the specified
              texture.
     \ingroup pvr_scene_mgmt
+    \deprecated Use pvr_scene_begin_rtt() instead.
 
     This function currently only supports outputting at the same size as the
     actual screen. Thus, make sure rx and ry are at least large enough for that.
@@ -886,7 +900,35 @@ void pvr_scene_begin(void);
     \param  rx              Width of the texture buffer (in pixels).
     \param  ry              Height of the texture buffer (in pixels).
 */
-void pvr_scene_begin_txr(pvr_ptr_t txr, uint32_t *rx, uint32_t *ry);
+void pvr_scene_begin_txr(pvr_ptr_t txr, uint32_t *rx, uint32_t *ry)
+    __depr("pvr_scene_begin_txr() is deprecated. Use pvr_scene_begin_rtt().");
+
+/** \brief   Begin collecting scene data for rendering into a texture target
+             with an explicit render size.
+    \ingroup pvr_scene_mgmt
+
+    This is the preferred render-to-texture API and does not require a
+    screen-sized backing texture. The PVR will render into a region of render_w
+    by render_h pixels, using stride_px pixels as the backing memory pitch.
+
+    render_w and render_h describe the area to draw. stride_px describes the
+    number of pixels between rows in memory and must be greater than or equal
+    to render_w. For the initial 16-bit render target implementation,
+    stride_px must also be a multiple of 4 pixels.
+
+    \note Initial support is intended for 16-bit render targets, matching the
+    deprecated pvr_scene_begin_txr() compatibility wrapper behavior.
+
+    \param  txr             The texture to render to.
+    \param  render_w        Width of the render area (in pixels).
+    \param  render_h        Height of the render area (in pixels).
+    \param  stride_px       Backing texture pitch (in pixels).
+
+    \retval 0               On success.
+    \retval -1              If the specified arguments are invalid.
+*/
+int pvr_scene_begin_rtt(pvr_ptr_t txr, uint32_t render_w,
+                        uint32_t render_h, uint32_t stride_px);
 
 
 /** \defgroup pvr_list_mgmt Polygon Lists
@@ -1025,7 +1067,7 @@ int pvr_list_flush(pvr_list_t list);
     \ingroup pvr_scene_mgmt
 
     Once this has been called, you can not submit any more data until one of the
-    pvr_scene_begin() or pvr_scene_begin_txr() functions is called again.
+    pvr_scene_begin() or pvr_scene_begin_rtt() functions is called again.
 
     \retval 0               On success.
     \retval -1              On error (no scene started).

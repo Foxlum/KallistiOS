@@ -37,7 +37,7 @@ __BEGIN_DECLS
     \ingroup                    debugging
 
    Various debug options. Uncomment the `#define` line to enable the specific
-   option described. 
+   option described.
 
    @{
 */
@@ -110,7 +110,7 @@ __BEGIN_DECLS
    malloc, as well as everything in level 2. */
 /* #define KOS_DEBUG 3 */
 
-#ifndef KOS_DEBUG 
+#ifndef KOS_DEBUG
 #define KOS_DEBUG 0
 #endif
 
@@ -128,11 +128,6 @@ __BEGIN_DECLS
 #if KOS_DEBUG >= 3
 #define PVR_KM_DBG_VERBOSE 1
 #define VMUFS_DEBUG 1
-#endif
-
-/** \brief  The maximum number of ramdisk files that can be open at a time. */
-#ifndef FS_RAMDISK_MAX_FILES
-#define FS_RAMDISK_MAX_FILES 8
 #endif
 
 /** \brief  The number of distinct file descriptors, including files and

@@ -53,7 +53,7 @@ __BEGIN_DECLS
 
 #ifdef NDEBUG
 #   define assert(e) ((void)0)
-#   define assert_msg(e, m) ((void)0)
+#   define assert_msg(e, m) assert(e)
 #else
 
 /* This bit of magic borrowed from Newlib's assert.h... */

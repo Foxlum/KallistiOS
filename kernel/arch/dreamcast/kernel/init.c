@@ -20,7 +20,9 @@
 #include <kos/platform.h>
 #include <kos/timer.h>
 #include <arch/arch.h>
+#include <arch/gdb.h>
 #include <arch/rtc.h>
+#include <dc/cache.h>
 #include <dc/memory.h>
 #include <dc/perfctr.h>
 #include <dc/ubc.h>
@@ -33,14 +35,9 @@
 #include "initall_hdrs.h"
 
 /* ctor/dtor stuff from libgcc. */
-#if __GNUC__ == 4
-#define _init init
-#define _fini fini
-#endif
-
 extern void _init(void);
 extern void _fini(void);
-extern void __verify_newlib_patch();
+extern void __verify_newlib_patch(void);
 extern void dma_init(void);
 
 /* Jump back to the bootloader. From startup.S */
@@ -49,17 +46,18 @@ void arch_real_exit(int ret_code) __noreturn;
 void (*__kos_init_early_fn)(void) __attribute__((weak,section(".data"))) = NULL;
 
 int main(int argc, char **argv);
-uint32 _fs_dclsocket_get_ip(void);
 
 void arch_init_net_dcload_ip(void) {
     union {
-        uint32 ipl;
-        uint8 ipb[4];
+        uint32_t ipl;
+        uint8_t ipb[4];
     } ip = { 0 };
 
     if(dcload_type == DCLOAD_TYPE_IP) {
+        uint32_t tool_ip, tool_port;
+
         /* Grab the IP address from dcload before we disable dbgio... */
-        ip.ipl = _fs_dclsocket_get_ip();
+        ip.ipl = dcload_gethostinfo(&tool_ip, &tool_port);
         dbglog(DBG_INFO, "dc-load says our IP is %d.%d.%d.%d\n", ip.ipb[3],
                ip.ipb[2], ip.ipb[1], ip.ipb[0]);
         dbgio_disable();
@@ -68,12 +66,9 @@ void arch_init_net_dcload_ip(void) {
     net_init(ip.ipl);     /* Enable networking (and drivers) */
 
     if(dcload_type == DCLOAD_TYPE_IP) {
-        fs_dclsocket_init_console();
-
-        if(!fs_dclsocket_init()) {
-            dbgio_dev_select("fs_dclsocket");
+        if(!dcload_syscall_net_init()) {
             dbgio_enable();
-            dbglog(DBG_INFO, "fs_dclsocket console support enabled\n");
+            dbglog(DBG_INFO, "dcload_syscalls_net backend enabled\n");
         }
     }
 }
@@ -131,7 +126,6 @@ void dcload_init(void) {
 KOS_INIT_FLAG_WEAK(dcload_init, true);
 KOS_INIT_FLAG_WEAK(fs_dcload_init_console, true);
 KOS_INIT_FLAG_WEAK(fs_dcload_shutdown, true);
-KOS_INIT_FLAG_WEAK(fs_dclsocket_shutdown, true);
 KOS_INIT_FLAG_WEAK(fs_init, true);
 KOS_INIT_FLAG_WEAK(fs_dev_init, true);
 KOS_INIT_FLAG_WEAK(fs_dev_shutdown, true);
@@ -171,7 +165,6 @@ int  __weak_symbol arch_auto_init(void) {
     dbgio_add_handler(&dbgio_fb);
     dbgio_add_handler(&dbgio_null);
     dbgio_add_handler(&dbgio_scif);
-    dbgio_add_handler(&dbgio_dcls);
     dbgio_add_handler(&dbgio_dcload);
 
     /* Init debug IO */
@@ -236,7 +229,9 @@ int  __weak_symbol arch_auto_init(void) {
 }
 
 void  __weak_symbol arch_auto_shutdown(void) {
-    KOS_INIT_FLAG_CALL(fs_dclsocket_shutdown);
+    /* Restore the native transport before it is torn down below. */
+    dcload_syscall_net_shutdown();
+
     if (!KOS_PLATFORM_IS_NAOMI)
         KOS_INIT_FLAG_CALL(net_shutdown);
 
@@ -275,9 +270,16 @@ void  __weak_symbol arch_auto_shutdown(void) {
     rtc_shutdown();
 }
 
+/* The libgprof addon provides the strong version that starts gprof profiling.
+   Called before constructors so it always profiles them. */
+void __weak_symbol gprof_init(void);
+
 /* This is the entry point inside the C program */
 void arch_main(void) {
     int rv;
+
+    /* Enable caches */
+    cache_write_ccr((uint32_t)~0, CCR_DEFAULT);
 
     dma_init();
 
@@ -300,6 +302,10 @@ void arch_main(void) {
     __verify_newlib_patch();
 
     dbglog(DBG_INFO, "\n");
+
+    /* Start gprof profiling, if libgprof is linked in */
+    if(gprof_init)
+        gprof_init();
 
     /* Run ctors */
     _init();
@@ -428,7 +434,7 @@ void arch_abort(void) {
 /* Called to reboot the system; assume the system is in peril and don't
    try to call the dtors */
 void arch_reboot(void) {
-    typedef void (*reboot_func)() __noreturn;
+    typedef void (*reboot_func)(void) __noreturn;
     reboot_func rb;
 
     dbglog(DBG_CRITICAL, "arch: rebooting the system\n");

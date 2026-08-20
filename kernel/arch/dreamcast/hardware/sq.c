@@ -10,9 +10,9 @@
 
 #include <assert.h>
 
-#include <arch/cache.h>
 #include <arch/mmu.h>
 #include <dc/sq.h>
+#include <kos/cache.h>
 #include <kos/dbglog.h>
 #include <kos/mutex.h>
 
@@ -90,22 +90,16 @@ uint32_t *sq_lock(void *dest) {
 }
 
 void sq_unlock(void) {
-    sq_state_t *tmp_state;
-    bool with_mmu;
-
     if(sq_mutex.count == 0) {
         dbglog(DBG_WARNING, "sq_unlock: Called without any lock\n");
         return;
     }
 
-    tmp_state = &sq_state_cache[sq_mutex.count - 1];
-
     /* If we aren't the last entry, set the regs back where they belong */
     if(sq_mutex.count - 1) {
-        tmp_state = &sq_state_cache[sq_mutex.count - 2];
-        with_mmu = mmu_enabled();
+        sq_state_t *tmp_state = &sq_state_cache[sq_mutex.count - 2];
 
-        if(with_mmu)
+        if(mmu_enabled())
             mmu_set_sq_addr((void *)tmp_state->dest);
         else
             SET_QACR_REGS(tmp_state->dest, tmp_state->dest);
@@ -144,7 +138,7 @@ __noinline void *sq_cpy(void *dest, const void *src, size_t n) {
         /* If src is not 8-byte aligned, slow path */
         if(!__is_aligned(src, 8)) {
             while(nb--) {
-                dcache_pref_block(s + 8); /* Prefetch 32 bytes for next loop */
+                dcache_pref_line(s + 8); /* Prefetch 32 bytes for next loop */
                 d[0] = *(s++);
                 d[1] = *(s++);
                 d[2] = *(s++);

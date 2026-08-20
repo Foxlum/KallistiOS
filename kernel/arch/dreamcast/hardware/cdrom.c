@@ -11,8 +11,6 @@
  */
 #include <assert.h>
 
-#include <arch/cache.h>
-
 #include <dc/asic.h>
 #include <dc/cdrom.h>
 #include <dc/g1ata.h>
@@ -20,6 +18,7 @@
 #include <dc/syscalls.h>
 #include <dc/vblank.h>
 
+#include <kos/cache.h>
 #include <kos/irq.h>
 #include <kos/timer.h>
 #include <kos/thread.h>
@@ -44,7 +43,7 @@ also for the CDDA playback routines.
 */
 
 struct cmd_req_data {
-    int cmd;
+    cd_cmd_code_t cmd;
     void *data;
 };
 
@@ -81,7 +80,7 @@ static int cur_sector_size = 2048;
 
 /* Shortcut to cdrom_reinit_ex. Typically this is the only thing changed. */
 int cdrom_set_sector_size(int size) {
-    return cdrom_reinit_ex(-1, -1, size);
+    return cdrom_reinit_ex(CDROM_READ_DEFAULT, -1, size);
 }
 
 static int cdrom_poll(void *d, uint32_t timeout, int (*cb)(void *)) {
@@ -756,7 +755,7 @@ static void unlock_dma_memory(void) {
     if(patched) {
         flush_size = (patch_addr[1] - patch_addr[0]) + CACHE_L1_ICACHE_LINESIZE;
         flush_size &= ~(CACHE_L1_ICACHE_LINESIZE - 1);
-        icache_flush_range(patch_addr[0] | MEM_AREA_P1_BASE, flush_size);
+        icache_sync_range(patch_addr[0] | MEM_AREA_P1_BASE, flush_size);
     }
     *prot_reg = G1_ATA_DMA_UNLOCK_ALLMEM;
 }

@@ -8,18 +8,18 @@
 
  */
 
-#include <stdalign.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <assert.h>
 #include <dc/net/broadband_adapter.h>
 #include <dc/asic.h>
 #include <dc/g2bus.h>
-#include <dc/sq.h>
 #include <dc/flashrom.h>
-#include <arch/cache.h>
 #include <dc/memory.h>
+#include <kos/cache.h>
 #include <kos/dbglog.h>
 #include <kos/irq.h>
 #include <kos/net.h>
@@ -139,17 +139,17 @@ static int gaps_init(void) {
        there is a VERY good chance it will never change. */
 
     /* VEN:DEV is 11db:1234 (vendor code is "Sega Enterprises, LTD")
-       The GAPS bridge is really just an MMU with a memory buffer that maps 
-       the RTL8139C to the Dreamcast's memory space, so these are actually 
-       the PCI configuration registers for the RTL8139, not GAPS (those are 
+       The GAPS bridge is really just an MMU with a memory buffer that maps
+       the RTL8139C to the Dreamcast's memory space, so these are actually
+       the PCI configuration registers for the RTL8139, not GAPS (those are
        just the 0x1400 regs).
 
-       It has a custom ven:dev ID, but the class ID in 0x1608 indicates a 
-       network controller (byte 0x160b = 0x02 = network controller, 
+       It has a custom ven:dev ID, but the class ID in 0x1608 indicates a
+       network controller (byte 0x160b = 0x02 = network controller,
        0x160a = 0x00 = Ethernet controller)
 
-       See PCI Local Bus Specification 2.2 (2.3 has all the 2.2 stuff in 
-       it and the RTL8139C uses 2.2). This is also documented in the 
+       See PCI Local Bus Specification 2.2 (2.3 has all the 2.2 stuff in
+       it and the RTL8139C uses 2.2). This is also documented in the
        RTL8139C's datasheet, under "PCI Configuration Space Registers"
     */
 
@@ -188,8 +188,8 @@ static int gaps_init(void) {
 
             if(g2_read_32(GAPS_BASE + 0x141c) == 0xaa5500ff) {
                 g2_write_32(GAPS_BASE + 0x141c, 0x41474553);
-                /* I think GAPS automatically pulls RSTB low for 120ns, which 
-                   causes the EEPROM to autoload all the registers initially. 
+                /* I think GAPS automatically pulls RSTB low for 120ns, which
+                   causes the EEPROM to autoload all the registers initially.
                    So we don't need to worry about it.
                 */
                 return 0;
@@ -320,7 +320,7 @@ static int bba_hw_init(void) {
     g2_write_32(NIC(RT_MAR0), 0x55aaff00);
     g2_write_32(NIC(RT_MAR4), 0xaa5500ff);
 
-    if((g2_read_32(NIC(RT_MAR0)) == 0x55aaff00) && 
+    if((g2_read_32(NIC(RT_MAR0)) == 0x55aaff00) &&
        (g2_read_32(NIC(RT_MAR4)) == 0xaa5500ff)) {
         /* Enable receive and transmit functions */
         g2_write_8(NIC(RT_CHIPCMD), RT_CMD_RX_ENABLE | RT_CMD_TX_ENABLE);
@@ -345,7 +345,7 @@ static int bba_hw_init(void) {
     g2_write_8(NIC(RT_CFG9346), 0xc0);
 
     /* Old style would turn of LWACT and on DVRLOAD. New also disables LED0 and enables LED1 */
-    g2_write_8(NIC(RT_CONFIG1), (g2_read_8(NIC(RT_CONFIG1)) & 
+    g2_write_8(NIC(RT_CONFIG1), (g2_read_8(NIC(RT_CONFIG1)) &
         ~(RT_CONFIG1_LWACT | RT_CONFIG1_LED0)) | RT_CONFIG1_DVRLOAD | RT_CONFIG1_LED1);
 
     /* Enable FIFO auto-clear */
@@ -425,23 +425,56 @@ static void bba_hw_shutdown(void) {
     asic_evt_remove_handler(ASIC_EVT_EXP_PCI);
 }
 
-#define RXBSZ    (64*1024) /* must be a power of two */
-#define MAX_PKTS (RXBSZ / 32)
+#define RXBSZ       (64 * 1024) /* must be a power of two */
+#define MAX_PKTS    (RXBSZ / 32)
+#define RXBUF_EXTRA (2 * 1600)
+
 static struct pkt {
     uint16_t pkt_size;
     uint16_t offt;
     uint8_t *rxbuff;
-} rx_pkt[MAX_PKTS];
+} *rx_pkt;
 
-static alignas(32) uint8_t rxbuff[RXBSZ + 2 * 1600];
+static uint8_t *rxbuff;
 static uint32_t rxbuff_pos;
 static int rxin;
 static int rxout;
-static int dma_used;
+static atomic_int dma_used;
 
 static uint32_t rx_size;
 
 static void bba_rx(void);
+
+static int bba_rxbuf_alloc(void) {
+    if(rxbuff)
+        return 0;
+
+    rx_pkt = calloc(MAX_PKTS, sizeof(*rx_pkt));
+    if(!rx_pkt)
+        return -1;
+
+    rxbuff = aligned_alloc(32, RXBSZ + RXBUF_EXTRA);
+    if(!rxbuff) {
+        free(rx_pkt);
+        rx_pkt = NULL;
+        return -1;
+    }
+
+    rxbuff_pos = 0;
+    rxin = 0;
+    rxout = 0;
+    return 0;
+}
+
+static void bba_rxbuf_free(void) {
+    free(rxbuff);
+    rxbuff = NULL;
+    free(rx_pkt);
+    rx_pkt = NULL;
+    rxbuff_pos = 0;
+    rxin = 0;
+    rxout = 0;
+}
 
 static semaphore_t tx_sema;
 
@@ -459,7 +492,9 @@ static void rx_finish_enq(int room) {
     if(room > 0 && (((rxin + 1) % MAX_PKTS) != rxout)) {
         rxin = (rxin + 1) % MAX_PKTS;
         thd_worker_wakeup(rx_worker);
-        thd_schedule(true);
+        /* Only in IRQ context (unsafe from the TX drain). */
+        if(irq_inside_int())
+            thd_schedule(true);
     }
 }
 
@@ -469,7 +504,7 @@ static void bba_dma_cb(void *p) {
     if(next_len) {
         g2_dma_transfer(next_dst, next_src, next_len, 0,
                         bba_dma_cb, 0,  /* callback */
-                        1,  /* dir = 1, we're *reading* from the g2 bus */
+                        G2_DMA_TO_SH4,
                         0, G2_DMA_CHAN_BBA, 0);
         next_len = 0;
     }
@@ -501,7 +536,7 @@ static int bba_copy_packet(uint8_t *dst, uint32_t s, int len) {
             dma_used = 1;
             g2_dma_transfer(dst, src, len, 0,
                             bba_dma_cb, 0,  /* callback */
-                            1,  /* dir = 1, we're *reading* from the g2 bus */
+                            G2_DMA_TO_SH4,
                             0, G2_DMA_CHAN_BBA, 0);
         }
         else if(next_len) {
@@ -540,13 +575,13 @@ static int rx_enq(int ring_offset, size_t pkt_size) {
 
     /* Do we have space for it? */
     if(rxin != rxout
-       && ptr_diff(rx_pkt[rxout].rxbuff, &rxbuff[rxbuff_pos], RXBSZ) < aligned_size) {
+       && ptr_diff(rx_pkt[rxout].rxbuff, rxbuff + rxbuff_pos, RXBSZ) < aligned_size) {
         dbglog(DBG_WARNING, "No space in RX buffer\n");
         return -1;
     }
 
     /* Get a pointer to the receive buffer where we will store the packet */
-    rx_pkt[rxin].rxbuff = &rxbuff[rxbuff_pos];
+    rx_pkt[rxin].rxbuff = rxbuff + rxbuff_pos;
     if(__is_defined(USE_P2_AREA))
         rx_pkt[rxin].rxbuff = (void *)(((uintptr_t)rx_pkt[rxin].rxbuff) | MEM_AREA_P2_BASE);
 
@@ -578,6 +613,44 @@ static int bba_can_tx(void *d) {
     return 1;
 }
 
+/* Copy a large outbound frame into the current TX buffer with G2 DMA. Keep interrupts
+   active until the transfer is complete */
+static bool bba_tx_dma(const uint8_t *pkt, int len) {
+    size_t total = __align_up(len, 4);
+    size_t aligned = __align_down(total, 32);
+    size_t remainder = total - aligned;
+    int expected = 0;
+
+    /* Take the single shared BBA DMA channel, if available. */
+    if(!atomic_compare_exchange_strong(&dma_used, &expected, 1))
+        return false;
+
+    dcache_wback_range((uintptr_t)pkt, aligned);
+
+    /* Blocking DMA copy into the current TX buffer. Keep interrupts active to
+       queue up RX packets. */
+    g2_dma_transfer((void *)pkt, (void *)txdesc[rtl.cur_tx], aligned,
+                    1,             /* block */
+                    NULL, NULL,    /* no callback */
+                    G2_DMA_TO_G2,
+                    0, G2_DMA_CHAN_BBA, 0);
+
+    if(remainder) {
+        g2_fifo_wait();
+        g2_write_block_32((uint32_t *)(pkt + aligned),
+                          txdesc[rtl.cur_tx] + aligned, remainder >> 2);
+    }
+
+    irq_disable_scoped();
+    dma_used = 0;
+
+    /* Drain any queued RX packets received during TX transfer. */
+    if(!(g2_read_8(NIC(RT_CHIPCMD)) & RT_CMD_RX_BUF_EMPTY))
+        bba_rx();
+
+    return true;
+}
+
 /* Transmit a single packet */
 static int bba_rtx(const uint8_t *pkt, int len, int wait)
 {
@@ -599,12 +672,12 @@ static int bba_rtx(const uint8_t *pkt, int len, int wait)
     }
 
     /* Copy the packet out to RTL memory */
-    /* XXX could use store queues or memcpy8 here */
-
-    //g2_write_block_8(pkt, txdesc[rtl.cur_tx], len);
-
     assert(__is_aligned((uintptr_t)pkt, 32));
-    g2_write_block_32((uint32_t *) pkt, txdesc[rtl.cur_tx], (len + 3) >> 2);
+
+    /* Large frames go out via G2 DMA when the channel is free. Interrupt
+       context, small frames, or a channel busy with RX fall back to PIO. */
+    if(irq_inside_int() || len < DMA_THRESHOLD || !bba_tx_dma(pkt, len))
+        g2_write_block_32((uint32_t *)pkt, txdesc[rtl.cur_tx], (len + 3) >> 2);
 
     /* All packets must be at least 60 bytes, pad them with null bytes if
        they are not already of an appropriate size. */
@@ -811,6 +884,11 @@ static int bba_if_init(netif_t *self) {
     if(bba_hw_init() < 0)
         return -1;
 
+    if(bba_rxbuf_alloc() < 0) {
+        bba_hw_shutdown();
+        return -1;
+    }
+
     memcpy(bba_if.mac_addr, rtl.mac, 6);
     set_ipv6_lladdr();
     bba_if.flags |= NETIF_INITIALIZED;
@@ -824,6 +902,7 @@ static int bba_if_shutdown(netif_t *self) {
         return 0;
 
     bba_hw_shutdown();
+    bba_rxbuf_free();
 
     bba_if.flags &= ~(NETIF_INITIALIZED | NETIF_RUNNING);
     return 0;
@@ -854,6 +933,8 @@ static int bba_if_start(netif_t *self) {
     /* Wait until the link is stabilized */
     if(!thd_poll(bba_link_is_stable, &link_stable, 10000)) {
         dbglog(DBG_ERROR, "bba: timed out waiting for link to stabilize\n");
+        thd_worker_destroy(rx_worker);
+        rx_worker = NULL;
         return -1;
     }
 

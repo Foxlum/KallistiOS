@@ -25,7 +25,6 @@
 __BEGIN_DECLS
 
 #include <stdint.h>
-#include <sys/queue.h>
 #include <kos/regfield.h>
 
 /** \defgroup elf   ELF File Format
@@ -248,7 +247,7 @@ switch (sh_type) {
 
 /** \brief   Symbol table entry
     \ingroup elf
-    
+
     This structure represents a single entry in a symbol table in an ELF file.
 
     \headerfile kos/elf.h

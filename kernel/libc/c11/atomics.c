@@ -9,10 +9,10 @@
    build flag.
 */
 
+#include <kos/cache.h>
 #include <kos/irq.h>
 #include <kos/mutex.h>
 #include <arch/arch.h>
-#include <arch/cache.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -195,7 +195,7 @@ bool __atomic_compare_exchange(size_t size,
 }
 
 /* All atomics for builtin types are lock-free, while our
-   generic atomics back-end utilizes spinlocks. */
+   generic atomics back-end utilizes mutexes. */
 bool __atomic_is_lock_free(size_t size, const volatile void *ptr) {
     (void)ptr;
     (void)size;

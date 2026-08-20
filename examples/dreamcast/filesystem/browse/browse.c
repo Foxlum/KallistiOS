@@ -9,16 +9,17 @@
    file operations like copying and deleting files.
 */
 
-#include <stdio.h> 
+#include <string.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <dirent.h>
+#include <langinfo.h>
 #include <libgen.h>
 #include <sys/stat.h>
 
 #include <dc/video.h>
 #include <fat/fs_fat.h>
-#include <kos/string.h>
 
 #include <kos/fs_romdisk.h>
 #include <kos/fs_ramdisk.h>
@@ -126,9 +127,12 @@ int main(int argc, char **argv) {
                     fs_path_append(directory_temp, current_directory, BUFFER_LENGTH);
                     fs_path_append(directory_temp, directory_contents[selector_index].filename, BUFFER_LENGTH);
 
-                    content_count = browse_directory(directory_temp, directory_contents);
-                    if(content_count > 0) {
-                        realpath(directory_temp, current_directory);
+                    memset(directory_temp2, 0, BUFFER_LENGTH);
+                    fs_normalize_path(directory_temp, directory_temp2);
+                    int tmp_content_count = browse_directory(directory_temp2, directory_contents);
+                    if(tmp_content_count > 0) {
+                        content_count = tmp_content_count;
+                        realpath(directory_temp2, current_directory);
                         changed_directory = true;
                         selector_index = 0;
                     } 
@@ -154,8 +158,9 @@ int main(int argc, char **argv) {
                     int copy_count = strrchr(current_directory, '/') - current_directory;
                     strncat(directory_temp, current_directory, (copy_count==0) ? 1 : copy_count );
                     /* Go the previous directory and get the directory contents */
-                    content_count = browse_directory(directory_temp, directory_contents);
-                    if(content_count > 0) {
+                    int tmp_content_count = browse_directory(directory_temp, directory_contents);
+                    if(tmp_content_count > 0) {
+                        content_count = tmp_content_count;
                         strcpy(current_directory, directory_temp);
                         changed_directory = true;
                         selector_index = 0;
@@ -218,7 +223,7 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-static bool mount_sd_fat() {
+static bool mount_sd_fat(void) {
     if(sd_init()) {
         fprintf(stderr, "Could not initialize the SD card. Please make sure that you "
                "have an SD card adapter plugged in and an SD card inserted.\n");
@@ -244,7 +249,7 @@ static bool mount_sd_fat() {
     return true;
 }
 
-static void unmount_sd_fat() {
+static void unmount_sd_fat(void) {
     fs_fat_unmount("/sd");
     fs_fat_shutdown();
     sd_shutdown();
@@ -349,7 +354,6 @@ static void draw_directory_selector(int index) {
 static void draw_directory_contents(directory_file_t *directory_contents, int num) {
     int x = 20 + BFONT_HEIGHT, y = BFONT_HEIGHT;
     int color = 1;
-    int count = 0;
     char str[80];
 
     bfont_set_foreground_color(0xFFFFFFFF);
@@ -362,7 +366,6 @@ static void draw_directory_contents(directory_file_t *directory_contents, int nu
         else {
             bfont_draw_str(vram_s + y*SCREEN_WIDTH+x, SCREEN_WIDTH, color, directory_contents[i].filename);
         }
-        count++;
         y += BFONT_HEIGHT;
 
         if(y >= (SCREEN_HEIGHT - BFONT_HEIGHT))
@@ -373,21 +376,23 @@ static void draw_directory_contents(directory_file_t *directory_contents, int nu
 static bool draw_stat(const char *path) {
     int x = 20 + BFONT_HEIGHT, y = 350;
     struct stat path_stat;
+    char timestring[64];
 
     /* If stat fails */
     if(stat(path, &path_stat) < 0)
         return false;
 
     /* We got a stat, so lets draw it */
+    strftime(timestring, 64, nl_langinfo(D_T_FMT), localtime(&path_stat.st_mtime));
     bfont_draw_str_fmt(vram_s + y*SCREEN_WIDTH+x, SCREEN_WIDTH, true,
     "Stat succeeded:\n\tFile size: %lu\n\tLast Modified: %s\n",
     S_ISDIR(path_stat.st_mode) ? 0 : path_stat.st_size,
-    asctime(gmtime(&path_stat.st_mtime)));
+    timestring);
 
     return true;
 }
 
-static cont_state_t *get_cont_state() {
+static cont_state_t *get_cont_state(void) {
     maple_device_t *cont;
     cont_state_t *state;
 

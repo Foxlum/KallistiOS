@@ -96,6 +96,9 @@ pvr_ptr_t __weak_symbol pvr_mem_malloc(size_t size) {
 
     if(__is_defined(PVR_KM_DBG)) {
         ctl = malloc(sizeof(memctl_t));
+        if(!ctl)
+            return (pvr_ptr_t)rv32;
+
         ctl->size = size;
         ctl->thread = thd_current->tid;
         ctl->addr = arch_get_ret_addr();
@@ -197,7 +200,7 @@ void __weak_symbol pvr_mem_reset(void) {
 
 void __weak_symbol pvr_mem_initialize(pvr_ptr_t pvr_texture_base, size_t available_memory) {
     (void)available_memory;
-    pvr_mem_sbrk = pvr_texture_base;
+    pvr_mem_base = pvr_texture_base;
 }
 
 /* Print some statistics (like mallocstats) */

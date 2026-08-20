@@ -157,7 +157,7 @@ typedef struct {
     int     view_target;                // Frame buffer we're viewing
                                         // (^1 == frame buffer we're rendering to)
 
-    int       list_reg_open;            // Which list is open for registration, if any? (non-DMA only)
+    pvr_list_t  list_reg_open;          // Which list is open for registration, if any? (non-DMA only)
     uint32_t  lists_closed;             // (1 << idx) for each list which the SH4 has lost interest in
     uint32_t  lists_transferred;        // (1 << idx) for each list which has completely transferred to the TA
     uint32_t  lists_dmaed;              // (1 << idx) for each list which has been DMA'd (DMA mode only)
@@ -222,6 +222,16 @@ typedef struct {
 
     // Render pitch for to-texture mode for the next frame
     int     next_to_txr_rp;
+
+    // Render target dimensions for to-texture mode for the current frame
+    uint32_t  to_txr_w;
+    uint32_t  to_txr_h;
+    uint32_t  to_txr_stride_px;
+
+    // Render target dimensions for to-texture mode for the next frame
+    uint32_t  next_to_txr_w;
+    uint32_t  next_to_txr_h;
+    uint32_t  next_to_txr_stride_px;
 
     // Output address for to-texture mode for the current frame
     uint32_t  to_txr_addr;

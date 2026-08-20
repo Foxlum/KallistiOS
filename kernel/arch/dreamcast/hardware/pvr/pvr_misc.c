@@ -177,9 +177,9 @@ void pvr_sync_reg_buffer(void) {
 void pvr_begin_queued_render(void) {
     volatile pvr_ta_buffers_t   *tbuf;
     volatile pvr_frame_buffers_t    *rbuf;
-    pvr_bkg_poly_t  bkg;
-    uint32_t      *vrl;
+    pvr_bkg_poly_t  *bkg;
     uint32_t      vert_end;
+    uint32_t      target_w, target_h;
     int bufn = pvr_state.view_target;
     union {
         float    f;
@@ -189,6 +189,8 @@ void pvr_begin_queued_render(void) {
     /* Get the appropriate buffer */
     tbuf = pvr_state.ta_buffers + (pvr_state.ta_target ^ pvr_state.vbuf_doublebuf);
     rbuf = pvr_state.frame_buffers + (bufn ^ 1);
+    target_w = pvr_state.curr_to_texture ? pvr_state.to_txr_w : (uint32_t)pvr_state.w;
+    target_h = pvr_state.curr_to_texture ? pvr_state.to_txr_h : (uint32_t)pvr_state.h;
 
     /* Calculate background value for below */
     /* Small side note: during setup, the value is originally
@@ -198,24 +200,25 @@ void pvr_begin_queued_render(void) {
     vert_end = 0x01000000 | ((PVR_GET(PVR_TA_VERTBUF_POS) - tbuf->vertex) << 1);
 
     /* Throw the background data on the end of the TA's list */
-    bkg.flags1 = 0x90800000;    /* These are from libdream.. ought to figure out */
-    bkg.flags2 = 0x20800440;    /*   what they mean for sure... heh =) */
-    bkg.dummy  = 0;
-    bkg.x1     = 0.0f;
-    bkg.y1     = pvr_state.h;
-    bkg.z1     = FLT_EPSILON;
-    bkg.argb1  = pvr_state.bg_color;
-    bkg.x2     = 0.0f;
-    bkg.y2     = 0.0f;
-    bkg.z2     = FLT_EPSILON;
-    bkg.argb2  = pvr_state.bg_color;
-    bkg.x3     = pvr_state.w;
-    bkg.y3     = pvr_state.h;
-    bkg.z3     = FLT_EPSILON;
-    bkg.argb3  = pvr_state.bg_color;
-    vrl = (uint32_t *)(PVR_RAM_BASE | PVR_GET(PVR_TA_VERTBUF_POS));
+    bkg = (pvr_bkg_poly_t *)(PVR_RAM_BASE | PVR_GET(PVR_TA_VERTBUF_POS));
 
-    memcpy(vrl, &bkg, sizeof(bkg));
+    *bkg = (pvr_bkg_poly_t){
+        .flags1 = 0x90800000,    /* These are from libdream.. ought to figure out */
+        .flags2 = 0x20800440,    /*   what they mean for sure... heh =) */
+        .dummy  = 0,
+        .x1     = 0.0f,
+        .y1     = target_h,
+        .z1     = FLT_EPSILON,
+        .argb1  = pvr_state.bg_color,
+        .x2     = 0.0f,
+        .y2     = 0.0f,
+        .z2     = FLT_EPSILON,
+        .argb2  = pvr_state.bg_color,
+        .x3     = target_w,
+        .y3     = target_h,
+        .z3     = FLT_EPSILON,
+        .argb3  = pvr_state.bg_color,
+    };
 
     /* Reset the ISP/TSP, just in case */
     //PVR_SET(PVR_RESET, PVR_RESET_ISPTSP);
@@ -235,8 +238,14 @@ void pvr_begin_queued_render(void) {
     PVR_SET(PVR_BGPLANE_CFG, vert_end); /* Bkg plane location */
     zclip.f = pvr_state.zclip;
     PVR_SET(PVR_BGPLANE_Z, zclip.i);
-    PVR_SET(PVR_PCLIP_X, pvr_state.pclip_x);
-    PVR_SET(PVR_PCLIP_Y, pvr_state.pclip_y);
+    if(!pvr_state.curr_to_texture) {
+        PVR_SET(PVR_PCLIP_X, pvr_state.pclip_x);
+        PVR_SET(PVR_PCLIP_Y, pvr_state.pclip_y);
+    }
+    else {
+        PVR_SET(PVR_PCLIP_X, ((target_w - 1) << 16) | 0);
+        PVR_SET(PVR_PCLIP_Y, ((target_h - 1) << 16) | 0);
+    }
 
     if(!pvr_state.curr_to_texture)
         PVR_SET(PVR_RENDER_MODULO, (pvr_state.w * vid_pmode_bpp[vid_mode->pm]) / 8);

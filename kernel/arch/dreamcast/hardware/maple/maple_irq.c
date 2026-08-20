@@ -16,6 +16,7 @@
 #include <dc/asic.h>
 #include <dc/pvr.h>
 #include <kos/dbglog.h>
+#include <kos/regfield.h>
 #include <kos/thread.h>
 
 /*********************************************************************/
@@ -63,16 +64,15 @@ static void vbl_chk_disconnect(maple_state_t *state, int p, int u) {
 
 static void vbl_chk_next_subdev(maple_state_t *state, maple_frame_t *frm, int p) {
     maple_device_t *dev = maple_enum_dev(p, 0);
-    int u;
 
     if(dev && dev->probe_mask) {
-        u = __builtin_ffs(dev->probe_mask);
-        dev->probe_mask &= ~(1 << (u - 1));
+        int u = __builtin_ffs(dev->probe_mask);
+        dev->probe_mask &= ~BIT(u - 1);
 
         vbl_send_devinfo(frm, p, u);
     } else {
         /* Nothing else to probe on this port */
-        state->scan_ready_mask |= 1 << p;
+        state->scan_ready_mask |= BIT(p);
     }
 }
 
@@ -80,19 +80,18 @@ static void vbl_dev_probed(int p, int u) {
     maple_device_t *dev = maple_enum_dev(p, 0);
 
     if(dev)
-        dev->dev_mask |= 1 << (u - 1);
+        dev->dev_mask |= BIT(u - 1);
 }
 
 /* Check the sub-devices for a top-level port */
 static void vbl_chk_subdevs(maple_state_t *state, int p, uint8_t newmask) {
     maple_device_t *dev = maple_enum_dev(p, 0);
-    unsigned int u;
 
-    newmask &= (1 << (MAPLE_UNIT_COUNT - 1)) - 1;
+    newmask &= BIT(MAPLE_UNIT_COUNT - 1) - 1;
 
     /* Disconnect any device that disappeared */
-    for(u = 1; u < MAPLE_UNIT_COUNT; u++) {
-        if(dev->dev_mask & ~newmask & (1 << (u - 1))) {
+    for(size_t u = 1; u < MAPLE_UNIT_COUNT; u++) {
+        if(dev->dev_mask & ~newmask & BIT(u - 1)) {
             vbl_chk_disconnect(state, p, u);
         }
     }
@@ -130,12 +129,30 @@ static void vbl_autodet_callback(maple_state_t *state, maple_frame_t *frm) {
     dev = maple_enum_dev(p, u);
 
     if(resp->response == MAPLE_RESPONSE_NONE) {
+
+        /* Don't try to disconnect unless we get MAPLE_DEV_VALID_TIMEOUT failed
+         * autodetects. A vmu being plugged in, or a puru doing certain sorts
+         * of rumbles cause the controller they're in to be unresponsive for
+         * a little bit. Having this timeout prevents them all from being
+         * disconnected only to be reconnected shortly after. */
+        if(dev && (dev->valid > 1)) {
+            dev->valid--;
+            maple_frame_unlock(frm);
+            return;
+        }
+
         /* No device, or not functioning properly; check for removal */
         if(u == 0) {
-            if(dev && dev->dev_mask == 0)
-                vbl_chk_disconnect(state, p, 0);
+            if(dev) {
+                /* Top-level device -- detach all sub-devices as well */
+                for(u = 0; u < MAPLE_UNIT_COUNT; u++) {
+                    vbl_chk_disconnect(state, p, u);
+                }
 
-            state->scan_ready_mask |= 1 << p;
+                dev->dev_mask = 0;
+            }
+
+            state->scan_ready_mask |= BIT(p);
         }
         else {
             /* Not a top-level device -- only detach this device */
@@ -147,10 +164,8 @@ static void vbl_autodet_callback(maple_state_t *state, maple_frame_t *frm) {
     else if(resp->response == MAPLE_RESPONSE_DEVINFO) {
         /* Device is present, check for connections */
         if(!dev) {
-            if(__is_defined(MAPLE_IRQ_DEBUG)) {
-                dbglog(DBG_KDEBUG, "maple: attach on device %c%c\n",
-                       'A' + p, '0' + u);
-            }
+            dbglog(DBG_SOURCE(MAPLE_IRQ_DEBUG), "maple: attach on device %c%c\n",
+                   'A' + p, '0' + u);
 
             if(maple_driver_attach(frm) == 0) {
                 assert(maple_dev_valid(p, u));
@@ -163,6 +178,9 @@ static void vbl_autodet_callback(maple_state_t *state, maple_frame_t *frm) {
             dev->info.function_data[0] = devinfo->function_data[0];
             dev->info.function_data[1] = devinfo->function_data[1];
             dev->info.function_data[2] = devinfo->function_data[2];
+
+            /* Since we got a response, reset the timeout */
+            dev->valid = MAPLE_DEV_VALID_TIMEOUT;
         }
 
         /* If this is a top-level port, then also check any
@@ -180,18 +198,23 @@ static void vbl_autodet_callback(maple_state_t *state, maple_frame_t *frm) {
     else {
         dbglog(DBG_DEBUG, "maple: unknown response %d on device %c%c\n",
             resp->response, 'A'+p, '0'+u);
-        state->scan_ready_mask |= 1 << p;
+        state->scan_ready_mask |= BIT(p);
         maple_frame_unlock(frm);
     }
 }
 
 static void vbl_autodetect(maple_state_t *state) {
-    bool queued;
-    maple_device_t  *dev = maple_state.ports[state->detect_port_next].units[0];
-    maple_frame_t   *frm = (dev != NULL) ? &dev->frame : &detect_frame;
+
+    if(state->detect_port_next == 0 && state->port0_mie) {
+        state->detect_port_next = 1;
+        return;
+    }
+
+    maple_device_t *dev = maple_state.ports[state->detect_port_next].units[0];
+    maple_frame_t *frm = (dev != NULL) ? &dev->frame : &detect_frame;
 
     /* Queue a detection on the next device */
-    queued = vbl_send_devinfo(frm,
+    bool queued = vbl_send_devinfo(frm,
                               state->detect_port_next, 0);
 
     /* Move to the next device */
@@ -210,8 +233,6 @@ void maple_vbl_irq_hnd(uint32_t code, void *data) {
 
     (void)code;
 
-    /* dbgio_write_str("inside vbl_irq_hnd\n"); */
-
     /* Count, for fun and profit */
     state->vbl_cntr++;
 
@@ -227,8 +248,6 @@ void maple_vbl_irq_hnd(uint32_t code, void *data) {
     /* Send any queued data */
     if(!state->dma_in_progress)
         maple_queue_flush();
-
-    /* dbgio_write_str("finish vbl_irq_hnd\n"); */
 }
 
 /*********************************************************************/
@@ -238,12 +257,8 @@ void maple_vbl_irq_hnd(uint32_t code, void *data) {
 void maple_dma_irq_hnd(uint32_t code, void *data) {
     maple_state_t *state = data;
     maple_frame_t   *i, *tmp;
-    int8_t        resp;
-    uint32_t gun;
 
     (void)code;
-
-    /* dbgio_write_str("start dma_irq_hnd\n"); */
 
     /* Count, for fun and profit */
     state->dma_cntr++;
@@ -264,7 +279,7 @@ void maple_dma_irq_hnd(uint32_t code, void *data) {
 
         /* Check to see if it got a proper response; we might
            have to resubmit the request */
-        resp = ((int8_t *)i->recv_buf)[0];
+        int8_t resp = ((int8_t *)i->recv_buf)[0];
 
         if(resp == MAPLE_RESPONSE_AGAIN) {
             i->state = MAPLE_FRAME_UNSENT;
@@ -274,7 +289,7 @@ void maple_dma_irq_hnd(uint32_t code, void *data) {
            For instance, when setting motor selection to '0' rather than '1'. */
         else if(resp == MAPLE_RESPONSE_BADFUNC) {
             dbglog(DBG_ERROR, "maple_irq: error EBADFUNC on %c%i when sending command: %i\n",
-            ('A' - i->dst_port), i->dst_unit, i->cmd);
+            ('A' + i->dst_port), i->dst_unit, i->cmd);
         }
 
         if(__is_defined(MAPLE_DMA_DEBUG))
@@ -287,7 +302,7 @@ void maple_dma_irq_hnd(uint32_t code, void *data) {
 
         /* If it's got a callback, call it; otherwise unlock
            it manually (or it'll never get used again) */
-        if(i->callback != NULL)
+        if(i->callback)
             i->callback(state, i);
         else
             maple_frame_unlock(i);
@@ -295,11 +310,9 @@ void maple_dma_irq_hnd(uint32_t code, void *data) {
 
     /* If gun mode is enabled, read the latched H/V counter values. */
     if(state->gun_port > -1) {
-        gun = PVR_GET(PVR_GUN_POS);
+        uint32_t gun = PVR_GET(PVR_GUN_POS);
         state->gun_x = gun & 0x3ff;
         state->gun_y = (gun >> 16) & 0x3ff;
         state->gun_port = -1;
     }
-
-    /* dbgio_write_str("finish dma_irq_hnd\n"); */
 }

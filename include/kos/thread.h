@@ -41,10 +41,9 @@ __BEGIN_DECLS
 #include <kos/cdefs.h>
 #include <kos/tls.h>
 #include <kos/irq.h>
-#include <arch/types.h>
 
 #include <sys/queue.h>
-#include <sys/reent.h>
+#include <reent.h>
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -243,9 +242,6 @@ typedef struct __attribute__((aligned(32))) kthread {
     /** \brief  Size of the thread's stack, in bytes. */
     size_t stack_size;
 
-    /** \brief  Thread errno variable. */
-    int thd_errno;
-
     /** \brief  Our reent struct for newlib. */
     struct _reent thd_reent;
 
@@ -330,7 +326,7 @@ extern kthread_t *thd_current;
 
     \return                 Whatever the unblocker deems necessary to return.
 */
-int thd_block_now(irq_context_t *mycxt);
+int thd_block_now(irq_context_t *mycxt) __nonnull_all;
 
 /** \brief   Find a new thread to swap in.
 
@@ -369,7 +365,7 @@ kthread_t *thd_by_tid(tid_t tid);
 
     \sa thd_remove_from_runnable
 */
-void thd_add_to_runnable(kthread_t *t, bool front_of_line);
+void thd_add_to_runnable(kthread_t *t, bool front_of_line) __nonnull_all;
 
 /** \brief       Removes a thread from the runnable queue, if it's there.
     \relatesalso kthread_t
@@ -384,7 +380,7 @@ void thd_add_to_runnable(kthread_t *t, bool front_of_line);
 
     \sa thd_add_to_runnable
 */
-int thd_remove_from_runnable(kthread_t *thd);
+int thd_remove_from_runnable(kthread_t *thd) __nonnull_all;
 
 /** \brief       Create a new thread.
     \relatesalso kthread_t
@@ -439,7 +435,7 @@ kthread_t *thd_create_ex(const kthread_attr_t *__RESTRICT attr,
 
     \sa thd_create
 */
-int thd_destroy(kthread_t *thd);
+int thd_destroy(kthread_t *thd) __nonnull_all;
 
 /** \brief   Exit the current thread.
 
@@ -480,7 +476,7 @@ void thd_schedule(bool front_of_line);
 
     \param  thd     The thread to schedule next.
 */
-void thd_schedule_next(kthread_t *thd);
+void thd_schedule_next(kthread_t *thd) __nonnull_all;
 
 /** \brief   Throw away the current thread's timeslice.
 
@@ -581,7 +577,8 @@ kthread_t *thd_get_idle(void);
 /** \brief       Retrieve the thread's label.
     \relatesalso kthread_t
 
-    \param  thd             The thread to retrieve from.
+    \param  thd             The thread to retrieve from. If NULL, the current
+                            thread will be used.
 
     \return                 The human-readable label of the thread.
 
@@ -597,7 +594,8 @@ const char *thd_get_label(const kthread_t *thd);
     anything internally, and you can give them any label you want. These are
     mainly seen in the printouts from thd_pslist() or thd_pslist_queue().
 
-    \param  thd             The thread to set the label of.
+    \param  thd             The thread to set the label of. If NULL, the current
+                            thread will be used.
     \param  label           The string to set as the label.
 
     \sa thd_get_label
@@ -612,7 +610,8 @@ void thd_set_label(kthread_t *__RESTRICT thd, const char *__RESTRICT label);
     doing this, but this is here in case you need it when the thread isn't
     active for some reason.
 
-    \param  thd             The thread to retrieve from.
+    \param  thd             The thread to retrieve from. If NULL, the current
+                            thread will be used.
 
     \return                 The thread's working directory.
 
@@ -629,6 +628,7 @@ const char *thd_get_pwd(const kthread_t *thd);
     active for some reason.
 
     \param  thd             The thread to set the working directory of.
+                            If NULL, the current thread will be used.
     \param  pwd             The directory to set as active.
 
     \sa thd_get_pwd
@@ -641,7 +641,8 @@ void thd_set_pwd(kthread_t *__RESTRICT thd, const char *__RESTRICT pwd);
     This function retrieves a pointer to the errno value for the thread. You
     should generally just use the errno variable to access this.
 
-    \param  thd             The thread to retrieve from.
+    \param  thd             The thread to retrieve from. If NULL, the current
+                            thread will be used.
 
     \return                 A pointer to the thread's errno.
 */
@@ -663,11 +664,11 @@ struct _reent *thd_get_reent(kthread_t *thd);
     \relatesalso kthread_t
 
     Returns the amount of active CPU time the thread has consumed in
-    nanoseconds.
+    milliseconds.
 
     \param thd          The thead to retrieve the CPU time for.
 
-    \retval             Total utilized CPU time in nanoseconds.
+    \retval             Total utilized CPU time in milliseconds.
 */
 uint64_t thd_get_cpu_time(kthread_t *thd);
 
@@ -675,9 +676,9 @@ uint64_t thd_get_cpu_time(kthread_t *thd);
     \relatesalso kthread_t
 
     Returns the amount of active CPU time all threads have consumed in
-    nanoseconds.
+    milliseconds.
 
-    \retval             Total utilized CPU time in nanoseconds.
+    \retval             Total utilized CPU time in milliseconds.
 */
 uint64_t thd_get_total_cpu_time(void);
 
@@ -769,7 +770,7 @@ int thd_detach(kthread_t *thd);
 /** \brief       Iterate all threads and call the passed callback for each
     \relatesalso kthread_t
 
-    \param cb               The callback to call for each thread. 
+    \param cb               The callback to call for each thread.
                             If a nonzero value is returned, iteration
                             ceases immediately.
     \param data             User data to be passed to the callback
@@ -796,7 +797,7 @@ int thd_each(int (*cb)(kthread_t *thd, void *user_data), void *data);
 
     \sa thd_pslist_queue
 */
-int thd_pslist(int (*pf)(const char *fmt, ...));
+int thd_pslist(int (*pf)(const char *fmt, ...)) __nonnull_all;
 
 /** \brief   Print a list of all queued threads using the given print function.
 
@@ -806,12 +807,12 @@ int thd_pslist(int (*pf)(const char *fmt, ...));
 
     \sa thd_pslist
 */
-int thd_pslist_queue(int (*pf)(const char *fmt, ...));
+int thd_pslist_queue(int (*pf)(const char *fmt, ...)) __nonnull_all;
 
 /** \cond INTERNAL */
 
 /** \brief  Initialize the threading system.
-    
+
     This is normally done for you by default when KOS starts. This will also
     initialize all the various synchronization primitives.
     \retval -1              If threads are already initialized.
@@ -820,12 +821,11 @@ int thd_pslist_queue(int (*pf)(const char *fmt, ...));
 */
 int thd_init(void);
 
-
 /** \brief   Shutdown the threading system.
- 
+
     This is done for you by the normal shutdown procedure of KOS. This will
     also shutdown all the various synchronization primitives.
- 
+
     \sa thd_init
 */
 void thd_shutdown(void);

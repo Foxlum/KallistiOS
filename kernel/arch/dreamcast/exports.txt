@@ -1,5 +1,10 @@
 include kos.h
 include dc/sound/sound.h
+include dc/maple/mie.h
+
+# Cache management
+arch_icache_inval_range
+arch_icache_sync_range
 
 # ASIC
 asic_evt_set_handler
@@ -45,6 +50,7 @@ scif_spi_set_cs
 scif_spi_rw_byte
 scif_spi_slow_rw_byte
 scif_spi_write_byte
+scif_spi_write_data
 scif_spi_read_byte
 scif_spi_read_data
 
@@ -124,6 +130,11 @@ sq_set32
 sq_lock
 sq_unlock
 sq_wait
+
+# RTC
+arch_rtc_unix_secs
+arch_rtc_set_unix_secs
+dc_boot_time
 
 # Sound
 snd_mem_init
@@ -226,6 +237,38 @@ vmu_block_read
 vmu_block_write
 vmu_set_icon
 
+# MIE
+mie_port0_mode
+mie_get_coin_meter
+mie_read_coin_input
+mie_coin_decrease
+mie_coin_add
+mie_jvs_set_outputs
+mie_jvs_set_output
+mie_jvs_get_outputs
+mie_jvs_driver_outputs
+mie_btn_callback
+mie_jvs_callback
+mie_set_cont_map
+mie_analog_calib_get
+mie_analog_calib_set
+mie_analog_calib_reset
+mie_analog_calib_valid
+mie_analog_calib_start
+mie_analog_calib_cancel
+mie_analog_calib_active
+mie_analog_calib_current
+mie_analog_calib_capture
+mie_analog_norm_wheel
+mie_analog_norm_accel
+mie_analog_norm_brake
+mie_get_id
+mie_get_eeprom
+mie_set_eeprom
+mie_eeprom_crc16
+mie_eeprom_fix_crc
+mie_init_fw
+
 # VMUFS
 vmufs_dir_fill_time
 vmufs_root_read
@@ -299,6 +342,7 @@ pvr_poly_cxt_txr
 pvr_set_vertbuf
 pvr_scene_begin
 pvr_scene_begin_txr
+pvr_scene_begin_rtt
 pvr_list_begin
 pvr_list_finish
 pvr_prim

@@ -50,24 +50,10 @@ static uint64_t sfx_inuse = 0;
 
 /* Unload all loaded samples and free their SPU RAM */
 void snd_sfx_unload_all(void) {
-    snd_effect_t *t, *n;
+    snd_effect_t *t;
 
-    t = LIST_FIRST(&snd_effects);
-
-    while(t) {
-        n = LIST_NEXT(t, list);
-
-        snd_mem_free(t->locl);
-
-        if(t->stereo)
-            snd_mem_free(t->locr);
-
-        free(t);
-
-        t = n;
-    }
-
-    LIST_INIT(&snd_effects);
+    while((t = LIST_FIRST(&snd_effects)))
+        snd_sfx_unload((sfxhnd_t)t);
 }
 
 /* Unload a single sample */
@@ -396,7 +382,7 @@ sfxhnd_t snd_sfx_load(const char *fn) {
 
     /* Open the sound effect file */
     fd = fs_open(fn, O_RDONLY);
-    if(fd <= FILEHND_INVALID) {
+    if(fd == FILEHND_INVALID) {
         dbglog(DBG_ERROR, "snd_sfx_load: can't open %s\n", fn);
         return SFXHND_INVALID;
     }
@@ -448,7 +434,7 @@ sfxhnd_t snd_sfx_load_ex(const char *fn, uint32_t rate, uint16_t bitsize, uint16
     sfxhnd_t effect;
     file_t fd = fs_open(fn, O_RDONLY);
 
-    if(fd <= FILEHND_INVALID) {
+    if(fd == FILEHND_INVALID) {
         dbglog(DBG_ERROR, "snd_sfx_load_ex: can't open sfx %s\n", fn);
         return SFXHND_INVALID;
     }
@@ -520,6 +506,9 @@ sfxhnd_t snd_sfx_load_fd(file_t fd, size_t len, uint32_t rate, uint16_t bitsize,
     */
     if(read_len > 0) {
         tmp_buff = aligned_alloc(32, read_len);
+
+        if(!tmp_buff)
+            goto err_occurred;
 
         if(fs_read(fd, tmp_buff, read_len) <= 0) {
             goto err_occurred;
@@ -678,6 +667,8 @@ sfxhnd_t snd_sfx_load_raw_buf(char *buf, size_t len, uint32_t rate, uint16_t bit
     read_len = chan_len;
     if(read_len > 0) {
         tmp_buff = aligned_alloc(32, read_len);
+        if(!tmp_buff)
+            goto err_occurred;
         memcpy(tmp_buff, buf, read_len);
         bufidx += read_len;
 
@@ -755,12 +746,7 @@ int find_free_channel(void) {
 }
 
 int snd_sfx_play(sfxhnd_t idx, int vol, int pan) {
-    sfx_play_data_t data = {0};
-    data.chn = -1;
-    data.idx = idx;
-    data.vol = vol;
-    data.pan = pan;
-    return snd_sfx_play_ex(&data);
+    return snd_sfx_play_chn(-1, idx, vol, pan);
 }
 
 int snd_sfx_play_ex(sfx_play_data_t *data) {
